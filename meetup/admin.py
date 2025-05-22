@@ -46,7 +46,9 @@ class QuestionAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "telegram_id", "is_speaker", "subscribed_to_notifications")
-    list_filter = ("is_speaker", "subscribed_to_notifications")
+    list_display = ("user", "telegram_id", "is_speaker", "is_organizer", "subscribed_to_notifications")
+    list_filter = ("is_speaker", "is_organizer", "subscribed_to_notifications")
     search_fields = ("user__username", "telegram_id")
     raw_id_fields = ("user",)
+    list_per_page = 20
+    list_display_links = ("user",)

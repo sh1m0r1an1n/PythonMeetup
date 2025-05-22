@@ -6,7 +6,7 @@ from datetime import timedelta
 
 class Event(models.Model):
     """Модель для хранения информации о мероприятиях."""
-    
+
     title = models.CharField(max_length=200, verbose_name="Название")
     date = models.DateTimeField(verbose_name="Дата и время", db_index=True)
     description = models.TextField(verbose_name="Описание")
@@ -128,6 +128,7 @@ class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="Пользователь")
     telegram_id = models.CharField(max_length=100, unique=True, verbose_name="Telegram ID")
     is_speaker = models.BooleanField(default=False, verbose_name="Является докладчиком")
+    is_organizer = models.BooleanField(default=False, verbose_name="Является организатором")
     subscribed_to_notifications = models.BooleanField(
         default=True,
         verbose_name="Подписан на уведомления",
