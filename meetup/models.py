@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 
 class Event(models.Model):
@@ -19,8 +19,19 @@ class Event(models.Model):
 
     @property
     def is_active(self):
-        """Проверяет, активно ли мероприятие."""
-        return self.date.date() >= timezone.now().date()
+        """Мероприятие считается активным, если оно ещё не завершилось и содержит хотя бы один доклад."""
+        now = timezone.now()
+    
+        last_talk = self.talks.order_by("-end_time").first()
+        if not last_talk:
+            return False
+    
+        end_dt = timezone.make_aware(
+            datetime.combine(self.date.date(), last_talk.end_time)
+        )
+        end_dt += timedelta(minutes=15)
+    
+        return now <= end_dt
 
     def save(self, *args, **kwargs):
         """Сохраняет мероприятие и отправляет уведомления."""
@@ -91,32 +102,32 @@ class Talk(models.Model):
 
 
 class Question(models.Model):
-    """Модель для хранения вопросов к докладам."""
-    
     talk = models.ForeignKey(
-        Talk,
+        'Talk',
         on_delete=models.CASCADE,
-        related_name="questions",
-        verbose_name="Доклад",
+        related_name='questions',
+        verbose_name='Доклад',
     )
     user = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
-        related_name="asked_questions",
-        verbose_name="Пользователь",
+        on_delete=models.SET_NULL,
+        related_name='asked_questions',
+        verbose_name='Пользователь',
+        null=True, blank=True
     )
-    text = models.TextField(verbose_name="Текст вопроса")
+    text = models.TextField(verbose_name='Текст вопроса')
+    answer = models.TextField(verbose_name='Ответ спикера', null=True, blank=True)
     created_at = models.DateTimeField(
         auto_now_add=True,
-        verbose_name="Дата создания",
+        verbose_name='Дата создания',
         db_index=True,
     )
 
     class Meta:
-        verbose_name = "Вопрос"
-        verbose_name_plural = "Вопросы"
-        ordering = ["-created_at"]
-        indexes = [models.Index(fields=["created_at"])]
+        verbose_name = 'Вопрос'
+        verbose_name_plural = 'Вопросы'
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['created_at'])]
 
     def __str__(self):
         return f"Question for {self.talk.title}"

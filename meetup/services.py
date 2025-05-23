@@ -1,16 +1,14 @@
 from django.conf import settings
 from django.utils import timezone
-from telegram import Bot
-from telegram.error import TelegramError
+import telebot
+from telebot.apihelper import ApiTelegramException as TelegramError
 
 from .models import Event, Talk, UserProfile
 
 
 def get_telegram_bot():
-    """Возвращает экземпляр Telegram бота."""
-    if not settings.TELEGRAM_BOT_TOKEN:
-        return None
-    return Bot(token=settings.TELEGRAM_BOT_TOKEN)
+    token = getattr(settings, "TELEGRAM_BOT_TOKEN", None)
+    return telebot.TeleBot(token) if token else None
 
 
 def send_telegram_message(telegram_id, message):
