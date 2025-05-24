@@ -86,12 +86,20 @@ def build_talk_text(talk: Talk) -> str:
 
 
 def program_markup(event: Event) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            text=f"{t.title} — {t.speaker.get_full_name() or t.speaker.username}",
-            callback_data=f"talk_{t.id}"
-        )] for t in event.talks.order_by("start_time")
-    ])
+    now = timezone.localtime()
+    buttons = []
+    for talk in event.talks.order_by("start_time"):
+        start = timezone.make_aware(datetime.combine(event.date.date(), talk.start_time))
+        end = timezone.make_aware(datetime.combine(event.date.date(), talk.end_time))
+        start, end = map(timezone.localtime, (start, end))
+        is_current = start <= now <= end
+        indicator = "🟢 " if is_current else ""
+        time_str = talk.start_time.strftime("%H:%M")
+        speaker = talk.speaker.get_full_name() or talk.speaker.username
+        title = talk.title
+        text = f"{indicator}{time_str} {speaker} — {title}"
+        buttons.append([InlineKeyboardButton(text=text, callback_data=f"talk_{talk.id}")])
+    return InlineKeyboardMarkup(buttons)
 
 
 def talk_markup(talk_id: int) -> InlineKeyboardMarkup:
