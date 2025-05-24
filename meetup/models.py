@@ -76,13 +76,32 @@ class Talk(models.Model):
         indexes = [models.Index(fields=["event", "start_time"])]
 
     def save(self, *args, **kwargs):
-        """Сохраняет доклад и отправляет уведомления."""
         is_new = self.pk is None
+        old_self = None
+        if not is_new:
+            try:
+                old_self = Talk.objects.get(pk=self.pk)
+            except Talk.DoesNotExist:
+                pass
+
         super().save(*args, **kwargs)
 
+        from .services import notify_speaker, notify_program_change
+
         if is_new:
-            from .services import notify_speaker
             notify_speaker(self)
+            notify_program_change(self)
+        else:
+            fields_changed = (
+                not old_self or
+                old_self.title != self.title or
+                old_self.description != self.description or
+                old_self.start_time != self.start_time or
+                old_self.end_time != self.end_time or
+                old_self.speaker_id != self.speaker_id
+            )
+            if fields_changed:
+                notify_program_change(self)
 
     @property
     def is_active(self):

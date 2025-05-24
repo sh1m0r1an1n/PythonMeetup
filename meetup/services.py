@@ -72,7 +72,7 @@ def notify_speaker(talk):
             return
 
         message = (
-            f"🎤 <b>Новый доклад</b>\n\n"
+            f"🎤 <b>У вас новый доклад</b>\n\n"
             f"<b>{talk.title}</b>\n"
             f"📅 {talk.event.date.strftime('%d.%m.%Y')}\n"
             f"⏰ {talk.start_time.strftime('%H:%M')} - {talk.end_time.strftime('%H:%M')}\n\n"
@@ -82,3 +82,30 @@ def notify_speaker(talk):
         send_telegram_message(profile.telegram_id, message)
     except UserProfile.DoesNotExist:
         pass 
+
+
+def notify_program_change(talk):
+    """Уведомляет всех пользователей об изменении программы (докладов)."""
+    try:
+        event = talk.event
+        message = (
+            f"📌 <b>Изменения в программе мероприятия</b>\n\n"
+            f"<b>{event.title}</b>\n"
+            f"📅 {event.date.strftime('%d.%m.%Y')}\n\n"
+            f"Обновлён доклад:\n"
+            f"<b>{talk.title}</b>\n"
+            f"⏰ {talk.start_time.strftime('%H:%M')} - {talk.end_time.strftime('%H:%M')}\n"
+            f"🎤 {talk.speaker.get_full_name() or talk.speaker.username}\n\n"
+            f"{talk.description}"
+        )
+
+        profiles = UserProfile.objects.filter(
+            subscribed_to_notifications=True,
+            telegram_id__isnull=False
+        ).select_related("user")
+
+        for profile in profiles:
+            send_telegram_message(profile.telegram_id, message)
+
+    except Exception as e:
+        pass
