@@ -18,6 +18,7 @@ from meetup.signals import PENDING_ANSWER
 LOGO_PATH = os.path.join(settings.BASE_DIR, "logo2.png")
 PENDING_QUESTION = {}
 UPDATERS = {}
+PENDING_BROADCAST = set()
 
 
 def stop_updater(chat_id: int) -> None:
@@ -85,21 +86,25 @@ def build_talk_text(talk: Talk) -> str:
     )
 
 
-def program_markup(event: Event) -> InlineKeyboardMarkup:
+def program_markup(event: Event, is_organizer: bool = False) -> InlineKeyboardMarkup:
     now = timezone.localtime()
-    buttons = []
+    markup = InlineKeyboardMarkup()
     for talk in event.talks.order_by("start_time"):
         start = timezone.make_aware(datetime.combine(event.date.date(), talk.start_time))
         end = timezone.make_aware(datetime.combine(event.date.date(), talk.end_time))
         start, end = map(timezone.localtime, (start, end))
-        is_current = start <= now <= end
-        indicator = "🟢 " if is_current else ""
+        indicator = "🟢 " if start <= now <= end else ""
         time_str = talk.start_time.strftime("%H:%M")
         speaker = talk.speaker.get_full_name() or talk.speaker.username
         title = talk.title
         text = f"{indicator}{time_str} {speaker} — {title}"
-        buttons.append([InlineKeyboardButton(text=text, callback_data=f"talk_{talk.id}")])
-    return InlineKeyboardMarkup(buttons)
+        markup.add(InlineKeyboardButton(text=text, callback_data=f"talk_{talk.id}"))
+    if is_organizer:
+        markup.add(InlineKeyboardButton(
+            text="Массовая рассылка",
+            callback_data="mass_broadcast"
+        ))
+    return markup
 
 
 def talk_markup(talk_id: int) -> InlineKeyboardMarkup:
@@ -109,10 +114,11 @@ def talk_markup(talk_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def schedule_program_timer(bot, chat_id, message_id, event):
+def schedule_program_timer(bot, chat_id, message_id, event, is_organizer: bool = False):
     stop_updater(chat_id)
     stop_event = threading.Event()
     UPDATERS[chat_id] = stop_event
+
     def worker():
         while not stop_event.is_set():
             try:
@@ -120,13 +126,14 @@ def schedule_program_timer(bot, chat_id, message_id, event):
                     chat_id=chat_id,
                     message_id=message_id,
                     text=build_program_text(event),
-                    reply_markup=program_markup(event),
+                    reply_markup=program_markup(event, is_organizer=is_organizer),
                 )
             except Exception:
                 pass
             if timezone.localtime() >= timezone.localtime(event.date):
                 break
             stop_event.wait(60)
+
     threading.Thread(target=worker, daemon=True).start()
 
 
@@ -161,31 +168,32 @@ class Command(BaseCommand):
             raise CommandError("TELEGRAM_BOT_TOKEN не задан в settings.py")
         bot = telebot.TeleBot(token, parse_mode="HTML")
 
-        def show_program(chat_id, *, via_edit=None):
+        def show_program(chat_id, *, via_edit=None, is_organizer: bool = False):
             now = timezone.now()
-            upcoming_events = Event.objects.filter(date__gte=now - timedelta(days=1)).order_by("date")
-            active_event = next((e for e in upcoming_events if e.is_active), None)
-            if not active_event:
+            upcoming = Event.objects.filter(date__gte=now - timedelta(days=1)).order_by("date")
+            active = next((e for e in upcoming if e.is_active), None)
+            if not active:
                 text = "Митапов не запланировано."
+                markup = None
+                if is_organizer:
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("Массовая рассылка", callback_data="mass_broadcast"))
                 if via_edit:
                     try:
-                        bot.edit_message_text(chat_id=chat_id, message_id=via_edit.id, text=text)
+                        bot.edit_message_text(chat_id=chat_id, message_id=via_edit.id,
+                                              text=text, reply_markup=markup)
                     except Exception:
-                        bot.send_message(chat_id, text)
+                        bot.send_message(chat_id, text, reply_markup=markup)
                 else:
-                    bot.send_message(chat_id, text)
+                    bot.send_message(chat_id, text, reply_markup=markup)
                 stop_updater(chat_id)
                 return
-            text = build_program_text(active_event)
-            markup = program_markup(active_event)
+            text = build_program_text(active)
+            markup = program_markup(active, is_organizer=is_organizer)
             if via_edit:
                 try:
-                    bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=via_edit.id,
-                        text=text,
-                        reply_markup=markup,
-                    )
+                    bot.edit_message_text(chat_id=chat_id, message_id=via_edit.id,
+                                          text=text, reply_markup=markup)
                     msg_id = via_edit.id
                 except Exception:
                     msg = bot.send_message(chat_id, text, reply_markup=markup)
@@ -193,17 +201,23 @@ class Command(BaseCommand):
             else:
                 msg = bot.send_message(chat_id, text, reply_markup=markup)
                 msg_id = msg.message_id
-            schedule_program_timer(bot, chat_id, msg_id, active_event)
+            schedule_program_timer(bot, chat_id, msg_id, active, is_organizer=is_organizer)
 
         @bot.message_handler(commands=["start"])
         def start_handler(msg):
             chat_id = msg.chat.id
             tg_user = msg.from_user
+            is_organizer = UserProfile.objects.filter(
+                telegram_id=str(tg_user.id),
+                is_organizer=True
+            ).exists()
             if UserProfile.objects.filter(telegram_id=str(tg_user.id)).exists():
-                show_program(chat_id)
+                show_program(chat_id, is_organizer=is_organizer)
                 return
             caption = "Если хотите принять участие, нажмите \"Продолжить\"."
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("Продолжить", callback_data="register")]])
+            markup = InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Продолжить", callback_data="register")]]
+            )
             if os.path.isfile(LOGO_PATH):
                 with open(LOGO_PATH, "rb") as p:
                     bot.send_photo(chat_id, p, caption=caption, reply_markup=markup)
@@ -219,8 +233,12 @@ class Command(BaseCommand):
                 username = tg_user.username or f"tg_{tg_user.id}"
                 user, _ = User.objects.get_or_create(username=username)
                 UserProfile.objects.create(user=user, telegram_id=str(tg_user.id))
+            is_organizer = UserProfile.objects.filter(
+                telegram_id=str(tg_user.id),
+                is_organizer=True
+            ).exists()
             bot.answer_callback_query(call.id, text="Регистрация завершена")
-            show_program(chat_id, via_edit=call.message)
+            show_program(chat_id, via_edit=call.message, is_organizer=is_organizer)
 
         @bot.callback_query_handler(func=lambda c: c.data.startswith("talk_"))
         def cb_talk(call):
@@ -234,8 +252,12 @@ class Command(BaseCommand):
 
         @bot.callback_query_handler(func=lambda c: c.data == "back_program")
         def cb_back(call):
+            is_organizer = UserProfile.objects.filter(
+                telegram_id=str(call.from_user.id),
+                is_organizer=True
+            ).exists()
             bot.answer_callback_query(call.id)
-            show_program(call.message.chat.id, via_edit=call.message)
+            show_program(call.message.chat.id, via_edit=call.message, is_organizer=is_organizer)
 
         @bot.callback_query_handler(func=lambda c: c.data.startswith("ask_"))
         def cb_ask(call):
@@ -281,11 +303,14 @@ class Command(BaseCommand):
             except Question.DoesNotExist:
                 bot.reply_to(msg, "Вопрос не найден.")
 
-        @bot.message_handler(func=lambda m: UserProfile.objects.filter(telegram_id=str(m.from_user.id), is_speaker=True).exists())
+        @bot.message_handler(func=lambda m: (UserProfile.objects.filter(telegram_id=str(m.from_user.id), is_speaker=True).exists() and m.from_user.id not in PENDING_BROADCAST))
         def handle_speaker_answer(message):
             import re
             from django.contrib.auth.models import User
-            RE_ANSWER = re.compile(r"^ответ\s+на\s+вопрос\s*#(?P<qid>\d+):\s*(?P<answer>.+)", re.IGNORECASE | re.DOTALL)
+            RE_ANSWER = re.compile(
+                r"^ответ\s+на\s+вопрос\s*#(?P<qid>\d+):\s*(?P<answer>.+)",
+                re.IGNORECASE | re.DOTALL
+            )
             match = RE_ANSWER.match(message.text.strip())
             if not match:
                 return
@@ -313,6 +338,28 @@ class Command(BaseCommand):
                         )
                 except UserProfile.DoesNotExist:
                     pass
+
+        @bot.callback_query_handler(func=lambda c: c.data == "mass_broadcast")
+        def cb_mass_broadcast(call):
+            user_id = call.from_user.id
+            if not UserProfile.objects.filter(telegram_id=str(user_id), is_organizer=True).exists():
+                bot.answer_callback_query(call.id, text="Недостаточно прав")
+                return
+            PENDING_BROADCAST.add(user_id)
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, "Введите сообщение для рассылки:")
+        
+        @bot.message_handler(func=lambda m: m.from_user.id in PENDING_BROADCAST, content_types=['text'])
+        def handle_mass_broadcast(msg):
+            from meetup.services import send_telegram_message
+            PENDING_BROADCAST.discard(msg.from_user.id)
+            text = msg.text.strip()
+            recipients = UserProfile.objects.exclude(telegram_id__isnull=True)
+            success = 0
+            for profile in recipients:
+                if send_telegram_message(profile.telegram_id, text):
+                    success += 1
+            bot.reply_to(msg, f"Рассылка завершена. Успешно отправлено: {success}")
 
         self.stdout.write(self.style.SUCCESS("AskTheSpeakerBot запущен."))
         bot.infinity_polling(skip_pending=True)
