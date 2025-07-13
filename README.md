@@ -22,10 +22,25 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 ```
 
-3. Создайте файл `.env` и добавьте:
-```
+3. Создайте файл `.env` в корне проекта и добавьте необходимые переменные окружения:
+```env
+# Django settings
+SECRET_KEY=your-secret-key-here-50-characters-long
+DEBUG=True
+
+# Telegram Bot
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+
+# Time zone
+TIME_ZONE=Europe/Moscow
 ```
+
+**Описание переменных окружения:**
+
+- `SECRET_KEY` - **(обязательно)** секретный ключ Django для криптографических функций (50+ символов)
+- `DEBUG` - режим отладки (True/False), по умолчанию False
+- `TELEGRAM_BOT_TOKEN` - токен Telegram бота для отправки уведомлений
+- `TIME_ZONE` - часовой пояс приложения, по умолчанию Europe/Moscow
 
 4. Примените миграции:
 ```bash
