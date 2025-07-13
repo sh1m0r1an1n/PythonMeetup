@@ -33,17 +33,7 @@ class Event(models.Model):
     
         return now <= end_dt
 
-    def save(self, *args, **kwargs):
-        """Сохраняет мероприятие и отправляет уведомления."""
-        is_new = self.pk is None
-        super().save(*args, **kwargs)
 
-        from .services import notify_upcoming_event, notify_event_change
-
-        if is_new:
-            notify_upcoming_event(self)
-        else:
-            notify_event_change(self, "Обновлена информация о мероприятии")
 
     def __str__(self):
         return f"{self.title} ({self.date})"
@@ -75,43 +65,17 @@ class Talk(models.Model):
         ordering = ["event", "start_time"]
         indexes = [models.Index(fields=["event", "start_time"])]
 
-    def save(self, *args, **kwargs):
-        is_new = self.pk is None
-        old_self = None
-        if not is_new:
-            try:
-                old_self = Talk.objects.get(pk=self.pk)
-            except Talk.DoesNotExist:
-                pass
 
-        super().save(*args, **kwargs)
-
-        from .services import notify_speaker, notify_program_change
-
-        if is_new:
-            notify_speaker(self)
-            notify_program_change(self)
-        else:
-            fields_changed = (
-                not old_self or
-                old_self.title != self.title or
-                old_self.description != self.description or
-                old_self.start_time != self.start_time or
-                old_self.end_time != self.end_time or
-                old_self.speaker_id != self.speaker_id
-            )
-            if fields_changed:
-                notify_program_change(self)
 
     @property
     def is_active(self):
         """Проверяет, активен ли доклад."""
         now = timezone.now()
         talk_start = timezone.make_aware(
-            timezone.datetime.combine(self.event.date.date(), self.start_time)
+            datetime.combine(self.event.date.date(), self.start_time)
         )
         talk_end = timezone.make_aware(
-            timezone.datetime.combine(self.event.date.date(), self.end_time)
+            datetime.combine(self.event.date.date(), self.end_time)
         )
         talk_end += timedelta(minutes=30)
         return talk_start <= now <= talk_end and self.event.is_active
